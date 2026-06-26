@@ -322,7 +322,11 @@ def move():
             })
 
     except Exception as e:
-        pass
+        print(e)
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
 
     return jsonify({"status": "error", "message": "Illegal move"})
 
