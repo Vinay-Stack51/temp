@@ -41,19 +41,26 @@ def is_flask_running():
         return False
 
 
+import os
+
 def start_flask():
+    # Don't start Flask on Streamlit Cloud
+    if os.getenv("STREAMLIT_SERVER_PORT"):
+        return
+
+    import subprocess
+    import sys
+
     script_dir = os.path.dirname(os.path.abspath(__file__))
     app_path = os.path.join(script_dir, "app.py")
+
     env = os.environ.copy()
     env["FLASK_ENV"] = "production"
+
     subprocess.Popen(
         [sys.executable, app_path],
         env={**env, "FLASK_RUN_PORT": str(FLASK_PORT)},
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
     )
-
-
 # ── Start Flask if not running ────────────────────────────────
 if "flask_started" not in st.session_state:
     st.session_state.flask_started = False
