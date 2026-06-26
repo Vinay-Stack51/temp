@@ -1,8 +1,6 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify
 import chess
-import chess.pgn
 import random
-import time
 
 app = Flask(__name__)
 app.secret_key = "chess_secret_2024"
@@ -10,11 +8,7 @@ app.secret_key = "chess_secret_2024"
 # Global game state
 board = chess.Board()
 difficulty = "easy"
-move_history = []
-captured_white = []
-captured_black = []
 
-# Piece values
 PIECE_VALUES = {
     chess.PAWN: 100,
     chess.KNIGHT: 320,
@@ -24,7 +18,6 @@ PIECE_VALUES = {
     chess.KING: 20000
 }
 
-# Piece-square tables for positional evaluation
 PAWN_TABLE = [
      0,  0,  0,  0,  0,  0,  0,  0,
     50, 50, 50, 50, 50, 50, 50, 50,
@@ -110,57 +103,47 @@ def get_piece_square_value(piece_type, square, color):
     return table[idx]
 
 
-def evaluate_board(board):
-    if board.is_checkmate():
-        if board.turn == chess.WHITE:
-            return 99999
-        else:
-            return -99999
-
+def evaluate_board(b):
+    if b.is_checkmate():
+        return 99999 if b.turn == chess.WHITE else -99999
     score = 0
     for piece_type in PIECE_VALUES:
-        for sq in board.pieces(piece_type, chess.WHITE):
+        for sq in b.pieces(piece_type, chess.WHITE):
             score += PIECE_VALUES[piece_type]
             score += get_piece_square_value(piece_type, sq, chess.WHITE)
-        for sq in board.pieces(piece_type, chess.BLACK):
+        for sq in b.pieces(piece_type, chess.BLACK):
             score -= PIECE_VALUES[piece_type]
             score -= get_piece_square_value(piece_type, sq, chess.BLACK)
-
-    # Mobility bonus
-    score += len(list(board.legal_moves)) * 0.1
+    score += len(list(b.legal_moves)) * 0.1
     return score
 
 
-def order_moves(board, moves):
-    """Sort moves: captures first, then checks, then others"""
+def order_moves(b, moves):
     def move_priority(move):
         priority = 0
-        if board.is_capture(move):
-            victim = board.piece_at(move.to_square)
-            attacker = board.piece_at(move.from_square)
+        if b.is_capture(move):
+            victim = b.piece_at(move.to_square)
+            attacker = b.piece_at(move.from_square)
             if victim and attacker:
                 priority += PIECE_VALUES.get(victim.piece_type, 0) - PIECE_VALUES.get(attacker.piece_type, 0) / 10
-        board.push(move)
-        if board.is_check():
+        b.push(move)
+        if b.is_check():
             priority += 50
-        board.pop()
+        b.pop()
         return -priority
     return sorted(moves, key=move_priority)
 
 
-def minimax(board, depth, alpha, beta, maximizing):
-    if depth == 0 or board.is_game_over():
-        return evaluate_board(board)
-
-    legal_moves = list(board.legal_moves)
-    legal_moves = order_moves(board, legal_moves)
-
+def minimax(b, depth, alpha, beta, maximizing):
+    if depth == 0 or b.is_game_over():
+        return evaluate_board(b)
+    legal_moves = order_moves(b, list(b.legal_moves))
     if maximizing:
         max_eval = -99999
         for move in legal_moves:
-            board.push(move)
-            eval_score = minimax(board, depth - 1, alpha, beta, False)
-            board.pop()
+            b.push(move)
+            eval_score = minimax(b, depth - 1, alpha, beta, False)
+            b.pop()
             max_eval = max(max_eval, eval_score)
             alpha = max(alpha, eval_score)
             if beta <= alpha:
@@ -169,9 +152,9 @@ def minimax(board, depth, alpha, beta, maximizing):
     else:
         min_eval = 99999
         for move in legal_moves:
-            board.push(move)
-            eval_score = minimax(board, depth - 1, alpha, beta, True)
-            board.pop()
+            b.push(move)
+            eval_score = minimax(b, depth - 1, alpha, beta, True)
+            b.pop()
             min_eval = min(min_eval, eval_score)
             beta = min(beta, eval_score)
             if beta <= alpha:
@@ -181,7 +164,6 @@ def minimax(board, depth, alpha, beta, maximizing):
 
 def easy_ai():
     legal_moves = list(board.legal_moves)
-    # Easy: random but prefers captures
     captures = [m for m in legal_moves if board.is_capture(m)]
     if captures and random.random() < 0.5:
         board.push(random.choice(captures))
@@ -192,17 +174,14 @@ def easy_ai():
 def intermediate_ai():
     best_move = None
     best_score = -99999
-    legal_moves = list(board.legal_moves)
-    legal_moves = order_moves(board, legal_moves)
-
+    legal_moves = order_moves(board, list(board.legal_moves))
     for move in legal_moves:
         board.push(move)
-        score = evaluate_board(board)
+        score = -evaluate_board(board)
         board.pop()
         if score > best_score:
             best_score = score
             best_move = move
-
     if best_move:
         board.push(best_move)
 
@@ -210,9 +189,7 @@ def intermediate_ai():
 def hard_ai():
     best_move = None
     best_score = -99999
-    legal_moves = list(board.legal_moves)
-    legal_moves = order_moves(board, legal_moves)
-
+    legal_moves = order_moves(board, list(board.legal_moves))
     for move in legal_moves:
         board.push(move)
         score = minimax(board, 3, -99999, 99999, False)
@@ -220,14 +197,12 @@ def hard_ai():
         if score > best_score:
             best_score = score
             best_move = move
-
     if best_move:
         board.push(best_move)
 
 
 def ai_move():
-    global difficulty
-    if not board.legal_moves:
+    if not list(board.legal_moves):
         return
     if difficulty == "easy":
         easy_ai()
@@ -260,15 +235,38 @@ def get_captured_pieces():
     temp_board = chess.Board()
     for move in board.move_stack:
         if temp_board.is_capture(move):
-            captured_sq = move.to_square
-            piece = temp_board.piece_at(captured_sq)
-            if piece:
-                if piece.color == chess.WHITE:
-                    black_captures.append(piece.symbol().upper())
+            # En passant: captured pawn is not on to_square
+            if temp_board.is_en_passant(move):
+                if temp_board.turn == chess.WHITE:
+                    black_captures.append("P")
                 else:
-                    white_captures.append(piece.symbol().upper())
+                    white_captures.append("P")
+            else:
+                piece = temp_board.piece_at(move.to_square)
+                if piece:
+                    if piece.color == chess.WHITE:
+                        black_captures.append(piece.symbol().upper())
+                    else:
+                        white_captures.append(piece.symbol().upper())
         temp_board.push(move)
     return white_captures, black_captures
+
+
+def get_move_history_san():
+    """Return move history as SAN strings paired by move number."""
+    moves = []
+    temp_board = chess.Board()
+    san_list = []
+    for move in board.move_stack:
+        san_list.append(temp_board.san(move))
+        temp_board.push(move)
+    # Pair into (move_num, white_move, black_move)
+    pairs = []
+    for i in range(0, len(san_list), 2):
+        white = san_list[i]
+        black = san_list[i + 1] if i + 1 < len(san_list) else ""
+        pairs.append({"num": i // 2 + 1, "white": white, "black": black})
+    return pairs
 
 
 @app.route("/")
@@ -280,16 +278,14 @@ def home():
 def set_difficulty():
     global difficulty
     data = request.json
-    difficulty = data["difficulty"]
+    difficulty = data.get("difficulty", "easy")
     return jsonify({"status": "ok"})
 
 
 @app.route("/move", methods=["POST"])
 def move():
     data = request.json
-    uci = data["move"]
-
-    # Handle promotion
+    uci = data.get("move", "")
     promotion = data.get("promotion", None)
 
     try:
@@ -298,7 +294,6 @@ def move():
             chess_move = chess.Move.from_uci(uci + promotion)
         else:
             chess_move = chess.Move.from_uci(uci)
-            # Auto-promote to queen
             if chess_move not in board.legal_moves:
                 chess_move = chess.Move.from_uci(uci + "q")
 
@@ -310,6 +305,7 @@ def move():
 
             status, message = get_game_status()
             white_cap, black_cap = get_captured_pieces()
+            move_pairs = get_move_history_san()
 
             return jsonify({
                 "status": "ok",
@@ -318,42 +314,46 @@ def move():
                 "message": message,
                 "white_captures": white_cap,
                 "black_captures": black_cap,
-                "move_count": len(list(board.move_stack))
+                "move_count": len(list(board.move_stack)),
+                "move_history": move_pairs,
+                "turn": "white" if board.turn == chess.WHITE else "black"
             })
+        else:
+            return jsonify({"status": "error", "message": "Illegal move"})
 
     except Exception as e:
-        print(e)
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        })
-
-    return jsonify({"status": "error", "message": "Illegal move"})
+        print(f"Move error: {e}")
+        return jsonify({"status": "error", "message": str(e)})
 
 
 @app.route("/get_legal_moves", methods=["POST"])
 def get_legal_moves():
     data = request.json
-    square_name = data["square"]
+    square_name = data.get("square", "")
     try:
         square = chess.parse_square(square_name)
         legal = [move.uci()[2:4] for move in board.legal_moves if move.from_square == square]
         return jsonify({"moves": legal})
-    except:
-        return jsonify({"moves": []})
+    except Exception as e:
+        return jsonify({"moves": [], "error": str(e)})
 
 
 @app.route("/reset")
 def reset():
     global board
     board = chess.Board()
-    return jsonify({"fen": board.fen(), "status": "ok"})
+    return jsonify({
+        "fen": board.fen(),
+        "status": "ok",
+        "turn": "white"
+    })
 
 
 @app.route("/state")
 def state():
     white_cap, black_cap = get_captured_pieces()
     status, message = get_game_status()
+    move_pairs = get_move_history_san()
     return jsonify({
         "fen": board.fen(),
         "difficulty": difficulty,
@@ -362,9 +362,10 @@ def state():
         "move_count": len(list(board.move_stack)),
         "game_status": status,
         "message": message,
-        "turn": "white" if board.turn == chess.WHITE else "black"
+        "turn": "white" if board.turn == chess.WHITE else "black",
+        "move_history": move_pairs
     })
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000, debug=True)
