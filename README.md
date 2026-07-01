@@ -138,8 +138,3 @@ pip install -r requirements.txt
 * Game analysis with engine evaluation
 * Save and load completed games
 
----
-
-## 👨‍💻 Author
-
-Developed as an AI-powered Chess web application using Flask and Python.
