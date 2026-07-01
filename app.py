@@ -1,10 +1,6 @@
-import logging
 from flask import Flask, render_template, request, jsonify
 import chess
 import random
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 app.secret_key = "chess_secret_2024"
@@ -108,13 +104,8 @@ def get_piece_square_value(piece_type, square, color):
 
 
 def evaluate_board(b):
-    # FIX BUG #2: Correct checkmate sign.
-    # is_checkmate() is True when the side whose turn it is has been mated.
-    # If it's WHITE's turn and checkmate → WHITE lost → score should be very negative.
-    # If it's BLACK's turn and checkmate → BLACK lost → score should be very positive.
     if b.is_checkmate():
-        return -99999 if b.turn == chess.WHITE else 99999
-
+        return 99999 if b.turn == chess.WHITE else -99999
     score = 0
     for piece_type in PIECE_VALUES:
         for sq in b.pieces(piece_type, chess.WHITE):
@@ -196,17 +187,14 @@ def intermediate_ai():
 
 
 def hard_ai():
-    # FIX BUG #3: AI plays BLACK, so it wants to MINIMISE the board score
-    # (positive = good for white). Use best_score = +99999 and pick lowest.
     best_move = None
-    best_score = 99999  # FIXED: was -99999
+    best_score = -99999
     legal_moves = order_moves(board, list(board.legal_moves))
     for move in legal_moves:
         board.push(move)
-        # maximizing=True because after black moves it's white's turn to maximise
-        score = minimax(board, 3, -99999, 99999, True)
+        score = minimax(board, 3, -99999, 99999, False)
         board.pop()
-        if score < best_score:  # FIXED: was `score > best_score`
+        if score > best_score:
             best_score = score
             best_move = move
     if best_move:
@@ -247,6 +235,7 @@ def get_captured_pieces():
     temp_board = chess.Board()
     for move in board.move_stack:
         if temp_board.is_capture(move):
+            # En passant: captured pawn is not on to_square
             if temp_board.is_en_passant(move):
                 if temp_board.turn == chess.WHITE:
                     black_captures.append("P")
@@ -265,11 +254,13 @@ def get_captured_pieces():
 
 def get_move_history_san():
     """Return move history as SAN strings paired by move number."""
+    moves = []
     temp_board = chess.Board()
     san_list = []
     for move in board.move_stack:
         san_list.append(temp_board.san(move))
         temp_board.push(move)
+    # Pair into (move_num, white_move, black_move)
     pairs = []
     for i in range(0, len(san_list), 2):
         white = san_list[i]
@@ -288,8 +279,7 @@ def set_difficulty():
     global difficulty
     data = request.json
     difficulty = data.get("difficulty", "easy")
-    logger.info(f"Difficulty set to: {difficulty}")
-    return jsonify({"status": "ok", "difficulty": difficulty})
+    return jsonify({"status": "ok"})
 
 
 @app.route("/move", methods=["POST"])
@@ -298,8 +288,6 @@ def move():
     uci = data.get("move", "")
     promotion = data.get("promotion", None)
 
-    logger.debug(f"Move request: uci={uci}, promotion={promotion}")
-
     try:
         if promotion:
             promo_map = {"q": chess.QUEEN, "r": chess.ROOK, "b": chess.BISHOP, "n": chess.KNIGHT}
@@ -307,16 +295,13 @@ def move():
         else:
             chess_move = chess.Move.from_uci(uci)
             if chess_move not in board.legal_moves:
-                # Try promotion to queen (pawn reaching last rank)
                 chess_move = chess.Move.from_uci(uci + "q")
 
         if chess_move in board.legal_moves:
             board.push(chess_move)
-            logger.debug(f"Player move applied: {chess_move}")
 
             if not board.is_game_over():
                 ai_move()
-                logger.debug("AI move applied")
 
             status, message = get_game_status()
             white_cap, black_cap = get_captured_pieces()
@@ -334,11 +319,10 @@ def move():
                 "turn": "white" if board.turn == chess.WHITE else "black"
             })
         else:
-            logger.warning(f"Illegal move attempted: {uci}")
             return jsonify({"status": "error", "message": "Illegal move"})
 
     except Exception as e:
-        logger.error(f"Move error: {e}", exc_info=True)
+        print(f"Move error: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
 
@@ -349,10 +333,8 @@ def get_legal_moves():
     try:
         square = chess.parse_square(square_name)
         legal = [move.uci()[2:4] for move in board.legal_moves if move.from_square == square]
-        logger.debug(f"Legal moves for {square_name}: {legal}")
         return jsonify({"moves": legal})
     except Exception as e:
-        logger.error(f"get_legal_moves error: {e}", exc_info=True)
         return jsonify({"moves": [], "error": str(e)})
 
 
@@ -360,15 +342,10 @@ def get_legal_moves():
 def reset():
     global board
     board = chess.Board()
-    logger.info("Board reset")
     return jsonify({
         "fen": board.fen(),
         "status": "ok",
-        "turn": "white",
-        "move_history": [],
-        "white_captures": [],
-        "black_captures": [],
-        "move_count": 0
+        "turn": "white"
     })
 
 
