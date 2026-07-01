@@ -109,7 +109,7 @@ http://localhost:5000
 3. Click a piece to view its legal moves.
 4. Click a highlighted square to make your move.
 5. The AI automatically responds after each valid move.
-6. Continue until the game ends by checkmate, stalemate, or another valid game-ending condition.
+6. Continue until the game ends by checkmate, stalemate or another valid game-ending condition.
 
 ---
 
